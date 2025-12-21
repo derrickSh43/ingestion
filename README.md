@@ -95,6 +95,267 @@ OLLAMA_EMBED_MODEL=mxbai-embed-large
 - `vector_store.py`: local JSONL vector store + adapter loader.
 - `retrieval_service.py`: retrieval query pipeline + embedder selection.
 - `releases.py`: release metadata and promotion audit.
+
+
+# Ingestion Service: Learning Guide
+
+## What This Service Does
+
+This is a complete **capture → process → search** pipeline for learning content.
+
+You'll learn to:
+1. Capture a URL and store its HTML
+2. Process it through a pipeline (distill, filter, chunk, embed)
+3. Promote a "release" (make it searchable)
+4. Retrieve answers from the active release
+
+Think of it like: collect web pages → break them into pieces → make them searchable → ask questions.
+
+---
+
+## Before You Start
+
+### Required
+- **Python** (3.8+) with `venv`
+- **Node.js + npm** (for the admin interface)
+- **A folder for data** (you'll tell the system where to store everything)
+
+### Optional (for real embeddings)
+- **Ollama** running locally with an embedding model
+
+If you skip Ollama, the system will use deterministic embeddings (good for testing).
+
+---
+
+## Setup
+
+### 1. Get the Code
+
+```bash
+git clone <repo-url>
+cd ingestion
+```
+
+### 2. Backend Setup
+
+```bash
+# Create a Python virtual environment
+python -m venv .venv
+
+# Activate it
+# On Windows:
+.\.venv\Scripts\activate
+# On Mac/Linux:
+source .venv/bin/activate
+
+# Install dependencies
+pip install fastapi uvicorn
+```
+
+### 3. Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The UI will start at `http://localhost:5173`
+
+### 4. Set Up Your Data Folder
+
+Create a folder where the system will store everything (raw captures, processed data, vector index, etc.). Then set these environment variables:
+
+```bash
+# Windows (set these in your terminal or .env file)
+set INGESTION_DATA_ROOT=D:\AI cloud class\data
+set VECTOR_INDEX_ROOT=D:\AI cloud class\data\vector_index
+set RETRIEVAL_EMBED_PROVIDER=ollama
+set OLLAMA_EMBED_MODEL=mxbai-embed-large
+```
+
+```bash
+# Mac/Linux
+export INGESTION_DATA_ROOT=/path/to/your/data
+export VECTOR_INDEX_ROOT=/path/to/your/data/vector_index
+export RETRIEVAL_EMBED_PROVIDER=ollama
+export OLLAMA_EMBED_MODEL=mxbai-embed-large
+```
+
+**Just getting started?** Skip the Ollama ones. The system will work fine without them.
+
+### 5. Start the Backend
+
+```bash
+python -m uvicorn ingestion.api:app --reload
+```
+
+The API will start at `http://localhost:8000`
+
+---
+
+## The Workflow
+
+### Step 1: Capture a URL
+
+**What it does:** Downloads a web page and stores the raw HTML.
+
+**In the UI:**
+1. Open `http://localhost:5173`
+2. Paste a URL
+3. Click "Capture"
+
+**What to verify:**
+- A new folder appears in your data directory
+- The HTML file matches the page you captured
+
+**Behind the scenes:**
+- Endpoint: `POST /ingestion/raw-capture`
+- The system stores the raw HTML + metadata on disk
+
+---
+
+### Step 2: Ingest & Process
+
+**What it does:** Transforms raw HTML into searchable pieces.
+
+The pipeline runs these stages in order:
+
+| Stage | What it does | Output |
+|-------|-------------|--------|
+| **Distill** | Extracts text blocks from HTML | Sections |
+| **Classify** | Filters instructional vs non-instructional content | Labeled sections |
+| **Canonicalize** | Converts sections into structured learning objects | Canonical objects |
+| **Chunk** | Splits objects into search-sized pieces | Chunks (500 tokens each) |
+| **Embed** | Converts text to vectors for search | Embeddings |
+| **Index** | Organizes embeddings for fast retrieval | Vector index |
+
+**In the UI:**
+1. Select a capture
+2. Click "Run Ingestion"
+3. Wait for it to complete
+
+**What to verify:**
+Look in your data folder — you should see:
+```
+data/
+├── captures/          (raw HTML)
+├── distilled/         (extracted sections)
+├── canonical/         (structured objects)
+├── chunks/            (pieces ready to embed)
+├── embeddings/        (vector files)
+└── vector_index/      (search index)
+```
+
+---
+
+### Step 3: Manage Releases
+
+**What it does:** A "release" is a snapshot you promote to make it active for searching.
+
+**In the UI:**
+1. Go to "Releases" section
+2. View all releases for a domain
+3. Click "Promote" to make one active
+
+**Behind the scenes:**
+- Only the **active release** can be searched
+- Audit trail tracks all promotions
+
+---
+
+### Step 4: Retrieve (Search)
+
+**What it does:** Searches the active release with a natural language query.
+
+**In the UI:**
+1. Type your question
+2. Click "Search"
+3. Get back ranked results
+
+**Behind the scenes:**
+- Your query gets embedded (converted to a vector)
+- The system finds similar chunks in the vector index
+- Results are ranked by relevance
+
+---
+
+## Project Structure (What Each File Does)
+
+### The Main Files
+
+**`api.py`** — The front door. Handles all HTTP requests, captures URLs, stores data, logs events.
+
+**`pipeline.py`** — The assembly line. Orchestrates all processing stages in order.
+
+**`env.py`** — The wiring harness. Centralizes all configuration and data paths.
+
+### Pipeline Stages
+
+**`distiller.py`** — Extracts text blocks from raw HTML.
+
+**`section_classifier.py`** — Filters out non-instructional content.
+
+**`canonicalizer.py`** — Converts sections into structured learning objects.
+
+**`chunker.py`** — Splits objects into bite-sized pieces for embedding.
+
+**`embeddings.py`** — Converts text to vectors (using Ollama or deterministic fallback).
+
+**`vector_store.py`** — Stores and queries the vector index.
+
+### Supporting Files
+
+**`retrieval_service.py`** — Handles search queries against the active release.
+
+**`releases.py`** — Manages release metadata and promotion audits.
+
+**`observability.py`** — Logs events and metrics.
+
+**`integrity.py`** — Verifies data integrity and content hashes.
+
+**`schema_validator.py`** — Validates JSON data at each stage.
+
+**`gates.py`** — Input validation and safety checks.
+
+**Mental model:** Each stage has one job, saves its output, then passes to the next stage.
+
+---
+
+## Troubleshooting
+
+### "Data folder doesn't exist"
+Create the folder and set `INGESTION_DATA_ROOT` to its path.
+
+### "Ollama connection failed"
+Either:
+1. Start Ollama: `ollama serve`
+2. Or remove the Ollama environment variables (the system will fall back to deterministic embeddings)
+
+### "Ingestion didn't produce chunks"
+Check that the content passed the classifier (Step 2, Classify stage). Some pages may be filtered out if they're not instructional.
+
+### "Search returns no results"
+Make sure you've promoted a release to "active" before searching.
+
+---
+
+## Next Steps
+
+1. **Understand the pipeline** — Run a capture and watch the data folder fill up at each stage
+2. **Read the code** — Start with `api.py`, then follow to `pipeline.py`
+3. **Modify a stage** — Try tweaking the distiller or classifier to see how it changes output
+4. **Build on it** — Add custom metadata, change chunking strategy, etc.
+
+---
+
+## Questions?
+
+The best way to learn is to:
+- Capture a real page
+- Watch the folders fill up
+- Search for something and see what comes back
+- Read the code that made it happen
 - `observability.py`: event + metrics store.
 - `integrity.py`: content hash signing helpers for captures.
 - `schema_validator.py`: JSON schema validation helper.
