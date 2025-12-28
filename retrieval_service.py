@@ -8,8 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from .embeddings import DeterministicHashEmbeddingProvider, EmbeddingProvider, OllamaEmbeddingProvider
-from .env import (
+from embeddings import DeterministicHashEmbeddingProvider, EmbeddingProvider, OllamaEmbeddingProvider
+from env import (
 	get_ingestion_embed_provider,
 	get_ollama_base_url,
 	get_ollama_embed_model,
@@ -19,8 +19,8 @@ from .env import (
 	get_retrieval_embed_provider,
 	get_vector_index_root,
 )
-from .releases import ReleaseManager
-from .vector_store import VectorStoreAdapter, build_vector_store_adapter
+from releases import ReleaseManager
+from vector_store import VectorStoreAdapter, build_vector_store_adapter
 
 
 def _default_provider_name() -> str:

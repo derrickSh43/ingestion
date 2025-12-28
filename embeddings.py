@@ -29,7 +29,7 @@ class EmbeddingStore(Protocol):
         """Store vector and return an embedding reference string."""
 
 
-from .env import get_embeddings_root
+from env import get_embeddings_root
 
 DEFAULT_EMBEDDINGS_ROOT = get_embeddings_root()
 

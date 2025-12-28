@@ -9,6 +9,8 @@ Self-contained ingestion + retrieval service with a minimal admin UI. It ingests
 - Query the active release with vector search.
 - Expose a minimal admin UI to run capture, ingestion, retrieval, and promotions.
 
+Runbook: `docs/INGESTION_RUNBOOK.md`
+
 ## High-level flow
 1) Capture: fetch URL and persist raw HTML + metadata under `INGESTION_DATA_ROOT`.
 2) Distill: extract candidate sections from HTML.
@@ -41,7 +43,7 @@ npm install
 
 Backend:
 ```
-python -m uvicorn ingestion.api:app --reload
+python -m uvicorn api:app --host 127.0.0.1 --port 8002 --reload
 ```
 
 Frontend:
@@ -50,6 +52,13 @@ cd frontend
 npm install
 npm run dev
 ```
+
+Frontend config:
+- `frontend/.env`: set `VITE_API_BASE_URL=http://localhost:8002` to point the UI at the backend.
+
+Useful URLs:
+- Backend docs: `http://127.0.0.1:8002/docs`
+- Frontend UI: `http://127.0.0.1:5174/`
 
 ## Environment variables
 - `INGESTION_DATA_ROOT`: base directory for all data artifacts (canonical, chunks, embeddings, releases, captures, etc).
@@ -74,13 +83,19 @@ OLLAMA_EMBED_MODEL=mxbai-embed-large
 ```
 
 ## Backend API
+- `GET /domains`: list domains with any local artifacts.
 - `POST /ingestion/raw-capture`: fetch and persist a URL capture.
+- `POST /ingestion/raw-capture/batch`: capture multiple URLs (fail-fast by default).
+- `POST /ingestion/file-capture`: upload a file (.html/.txt/.md/.doc/.docx) and persist it as a capture.
 - `POST /ingestion/run`: run the ingestion pipeline (raw_html/raw_html_path/capture_id).
+- `POST /ingestion/run/batch`: run ingestion for multiple inputs into one release (release_id optional; fail-fast by default).
+- `POST /ingestion/ingest/batch`: convenience endpoint for capture+run in one call (release_id optional; fail-fast by default).
 - `POST /ingestion/quarantine`: mark a capture as quarantined.
 - `GET /ingestion/{domain}/events`: list observability events.
 - `GET /ingestion/{domain}/metrics`: summarize observability events.
 - `GET /releases/{domain}`: list releases and active release.
 - `GET /releases/{domain}/audit`: list release audit events.
+- `POST /releases/{domain}/merge`: merge multiple releases into a new candidate release.
 - `POST /releases/{domain}/{release_id}/promote`: promote a release.
 - `POST /retrieve`: run a retrieval query.
 

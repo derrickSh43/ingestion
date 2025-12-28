@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import hashlib
 import re
 
-from .cleaner import clean_html_text
+from cleaner import clean_html_text
 
 _CONTAINER_TAGS = ("nav", "footer", "header", "aside")
 

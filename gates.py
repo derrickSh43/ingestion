@@ -19,12 +19,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import argparse
 import json
 
-from .schema_validator import validate_instance
-from .releases import get_releases_root
-from .vector_store import DEFAULT_INDEX_ROOT
-from .chunker import DEFAULT_CHUNKS_ROOT
-from .canonicalizer import DEFAULT_CANONICAL_ROOT
-from .embeddings import DEFAULT_EMBEDDINGS_ROOT
+from schema_validator import validate_instance
+from releases import get_releases_root
+from vector_store import DEFAULT_INDEX_ROOT
+from chunker import DEFAULT_CHUNKS_ROOT
+from canonicalizer import DEFAULT_CANONICAL_ROOT
+from embeddings import DEFAULT_EMBEDDINGS_ROOT
 
 @dataclass(frozen=True)
 class GateIssue:

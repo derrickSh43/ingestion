@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict
 
-from .env import BASE_DIR
+from env import BASE_DIR
 
 SCHEMAS_DIR = BASE_DIR / "docs" / "schemas"
 

@@ -1,5 +1,17 @@
 ﻿import { api } from './client'
 
+export type DomainsResponse = {
+  domains: string[]
+}
+
+export const domainsQueryKey = () => ['domains'] as const
+
+export async function getDomains(): Promise<DomainsResponse> {
+  const res = await api.get<DomainsResponse>('/domains')
+  const domains = Array.isArray(res.data?.domains) ? res.data.domains.filter((d) => typeof d === 'string') : []
+  return { domains }
+}
+
 export type IngestionMetricsResponse = {
   domain: string
   [key: string]: unknown
@@ -59,6 +71,76 @@ export type IngestionRunResponse = {
   counts: Record<string, number>
 }
 
+export type IngestionRawCaptureBatchItem = {
+  source_id: string
+  url: string
+  timeout?: number
+  persist_to_db?: boolean
+  clean?: boolean
+  quarantine_suspicious?: boolean
+}
+
+export type IngestionRawCaptureBatchRequest = {
+  domain: string
+  continue_on_error?: boolean
+  items: IngestionRawCaptureBatchItem[]
+}
+
+export type IngestionRawCaptureBatchResponse = {
+  domain: string
+  summary: Record<string, number>
+  results: Array<Record<string, unknown>>
+}
+
+export type IngestionRunBatchItem = {
+  source_id: string
+  raw_html?: string | null
+  raw_html_path?: string | null
+  capture_id?: string | null
+}
+
+export type IngestionRunBatchRequest = {
+  domain: string
+  release_id?: string | null
+  created_by?: string | null
+  continue_on_error?: boolean
+  force?: boolean
+  items: IngestionRunBatchItem[]
+}
+
+export type IngestionRunBatchResponse = {
+  domain: string
+  release_id: string
+  release: Record<string, unknown>
+  summary: Record<string, unknown>
+  results: Array<Record<string, unknown>>
+}
+
+export type IngestionIngestBatchItem = {
+  source_id: string
+  url: string
+  timeout?: number
+  clean?: boolean
+  quarantine_suspicious?: boolean
+}
+
+export type IngestionIngestBatchRequest = {
+  domain: string
+  release_id?: string | null
+  created_by?: string | null
+  continue_on_error?: boolean
+  force?: boolean
+  items: IngestionIngestBatchItem[]
+}
+
+export type IngestionIngestBatchResponse = {
+  domain: string
+  release_id: string
+  release: Record<string, unknown>
+  summary: Record<string, unknown>
+  results: Array<Record<string, unknown>>
+}
+
 export type QuarantineCaptureRequest = {
   domain: string
   capture_id: string
@@ -96,6 +178,24 @@ export async function postIngestionRawCapture(body: IngestionRawCaptureRequest):
   return res.data
 }
 
+export async function postIngestionRawCaptureBatch(
+  body: IngestionRawCaptureBatchRequest,
+): Promise<IngestionRawCaptureBatchResponse> {
+  const res = await api.post<IngestionRawCaptureBatchResponse>('/ingestion/raw-capture/batch', {
+    domain: body.domain,
+    continue_on_error: body.continue_on_error ?? false,
+    items: body.items.map((it) => ({
+      source_id: it.source_id,
+      url: it.url,
+      timeout: it.timeout ?? 10,
+      persist_to_db: it.persist_to_db ?? false,
+      clean: it.clean ?? false,
+      quarantine_suspicious: it.quarantine_suspicious ?? true,
+    })),
+  })
+  return res.data
+}
+
 export async function postQuarantineCapture(body: QuarantineCaptureRequest): Promise<IngestionRawCaptureResponse> {
   const res = await api.post<IngestionRawCaptureResponse>('/ingestion/quarantine', {
     domain: body.domain,
@@ -121,5 +221,68 @@ export async function postIngestionRun(body: IngestionRunRequest): Promise<Inges
       timeout: 180000,
     },
   )
+  return res.data
+}
+
+export async function postIngestionRunBatch(body: IngestionRunBatchRequest): Promise<IngestionRunBatchResponse> {
+  const res = await api.post<IngestionRunBatchResponse>(
+    '/ingestion/run/batch',
+    {
+      domain: body.domain,
+      release_id: body.release_id ?? null,
+      created_by: body.created_by ?? null,
+      continue_on_error: body.continue_on_error ?? false,
+      force: body.force ?? false,
+      items: body.items.map((it) => ({
+        source_id: it.source_id,
+        raw_html: it.raw_html ?? null,
+        raw_html_path: it.raw_html_path ?? null,
+        capture_id: it.capture_id ?? null,
+      })),
+    },
+    { timeout: 180000 },
+  )
+  return res.data
+}
+
+export async function postIngestionIngestBatch(body: IngestionIngestBatchRequest): Promise<IngestionIngestBatchResponse> {
+  const res = await api.post<IngestionIngestBatchResponse>(
+    '/ingestion/ingest/batch',
+    {
+      domain: body.domain,
+      release_id: body.release_id ?? null,
+      created_by: body.created_by ?? null,
+      continue_on_error: body.continue_on_error ?? false,
+      force: body.force ?? false,
+      items: body.items.map((it) => ({
+        source_id: it.source_id,
+        url: it.url,
+        timeout: it.timeout ?? 10,
+        clean: it.clean ?? false,
+        quarantine_suspicious: it.quarantine_suspicious ?? true,
+      })),
+    },
+    { timeout: 180000 },
+  )
+  return res.data
+}
+
+export async function postIngestionFileCapture(args: {
+  domain: string
+  source_id: string
+  file: File
+  clean?: boolean
+  quarantine_suspicious?: boolean
+}): Promise<IngestionRawCaptureResponse> {
+  const form = new FormData()
+  form.append('domain', args.domain)
+  form.append('source_id', args.source_id)
+  form.append('file', args.file)
+  if (args.clean !== undefined) form.append('clean', String(args.clean))
+  if (args.quarantine_suspicious !== undefined) form.append('quarantine_suspicious', String(args.quarantine_suspicious))
+  const res = await api.post<IngestionRawCaptureResponse>('/ingestion/file-capture', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+  })
   return res.data
 }

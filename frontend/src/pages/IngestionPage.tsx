@@ -1,27 +1,55 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 
 import { HeaderBar } from '../components/HeaderBar'
 import { useAuth } from '../auth/useAuth'
 import {
+  domainsQueryKey,
+  getDomains,
   getIngestionEvents,
   getIngestionMetrics,
   ingestionEventsQueryKey,
   ingestionMetricsQueryKey,
+  postIngestionIngestBatch,
+  postIngestionFileCapture,
   postIngestionRawCapture,
+  postIngestionRawCaptureBatch,
   postIngestionRun,
+  postIngestionRunBatch,
   postQuarantineCapture,
+  type IngestionIngestBatchResponse,
+  type IngestionRawCaptureBatchResponse,
   type IngestionRawCaptureResponse,
+  type IngestionRunBatchResponse,
   type IngestionRunResponse,
 } from '../api/ingestion'
 import { postRetrievalQuery, type RetrievalQueryRequest, type RetrievalQueryResponse } from '../api/retrieval'
-import { getReleaseAudit, getReleaseStatus, postReleasePromote, releaseAuditQueryKey, releaseStatusQueryKey } from '../api/releases'
+import {
+  getReleaseAudit,
+  getReleaseStatus,
+  postReleaseMerge,
+  postReleasePromote,
+  releaseAuditQueryKey,
+  releaseStatusQueryKey,
+  type ReleaseMergeResponse,
+} from '../api/releases'
 
 export function IngestionPage() {
   const { displayName } = useAuth()
   const [selectedDomain, setSelectedDomain] = useState<string>('')
   const domain = useMemo(() => selectedDomain.trim(), [selectedDomain])
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true)
+
+  const domainsQuery = useQuery({
+    queryKey: domainsQueryKey(),
+    queryFn: () => getDomains(),
+  })
+
+  const knownDomains = useMemo(() => {
+    const domains = domainsQuery.data?.domains
+    return Array.isArray(domains) ? domains.filter((d) => typeof d === 'string' && d.trim()).sort() : []
+  }, [domainsQuery.data])
 
   const [retrievalQuery, setRetrievalQuery] = useState<string>('')
   const [retrievalTopK, setRetrievalTopK] = useState<number>(5)
@@ -35,6 +63,22 @@ export function IngestionPage() {
   const [runnerRawHtmlPath, setRunnerRawHtmlPath] = useState<string>('')
   const [runnerRawHtml, setRunnerRawHtml] = useState<string>('')
   const [runnerError, setRunnerError] = useState<string | null>(null)
+
+  const [batchUrls, setBatchUrls] = useState<string>('')
+  const [batchReleaseId, setBatchReleaseId] = useState<string>('')
+  const [batchForce, setBatchForce] = useState<boolean>(false)
+  const [batchContinueOnError, setBatchContinueOnError] = useState<boolean>(false)
+  const [batchError, setBatchError] = useState<string | null>(null)
+
+  const [fileSourceId, setFileSourceId] = useState<string>(() => `file_${Date.now()}`)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [fileReleaseId, setFileReleaseId] = useState<string>('')
+  const [fileForce, setFileForce] = useState<boolean>(false)
+
+  const [mergeTargetReleaseId, setMergeTargetReleaseId] = useState<string>('')
+  const [mergeSelectedReleaseIds, setMergeSelectedReleaseIds] = useState<string[]>([])
+  const [mergeError, setMergeError] = useState<string | null>(null)
 
   const firstLine = (value: unknown): string => {
     if (typeof value === 'string' && value.trim()) return value.trim().split('\n')[0]
@@ -70,6 +114,92 @@ export function IngestionPage() {
     onSuccess: () => {
       void eventsQuery.refetch()
       void metricsQuery.refetch()
+    },
+  })
+
+  const rawCaptureBatchMutation = useMutation({
+    mutationFn: (args: { domain: string; items: Array<{ sourceId: string; url: string }> }) =>
+      postIngestionRawCaptureBatch({
+        domain: args.domain,
+        continue_on_error: batchContinueOnError,
+        items: args.items.map((it) => ({
+          source_id: it.sourceId,
+          url: it.url,
+          quarantine_suspicious: runnerQuarantineOnFail,
+        })),
+      }),
+    onSuccess: () => {
+      void eventsQuery.refetch()
+      void metricsQuery.refetch()
+    },
+  })
+
+  const fileCaptureMutation = useMutation({
+    mutationFn: (args: { domain: string; sourceId: string; file: File }) =>
+      postIngestionFileCapture({
+        domain: args.domain,
+        source_id: args.sourceId,
+        file: args.file,
+        clean: false,
+        quarantine_suspicious: true,
+      }),
+    onSuccess: () => {
+      void eventsQuery.refetch()
+      void metricsQuery.refetch()
+    },
+    onError: (err) => {
+      setFileError(firstLine(err))
+    },
+  })
+
+  const fileIngestMutation = useMutation({
+    mutationFn: async (args: { domain: string; sourceId: string; file: File; releaseId?: string | null; force: boolean }) => {
+      const capture = await postIngestionFileCapture({
+        domain: args.domain,
+        source_id: args.sourceId,
+        file: args.file,
+        clean: false,
+        quarantine_suspicious: true,
+      })
+      return await postIngestionRunBatch({
+        domain: args.domain,
+        release_id: args.releaseId ?? null,
+        created_by: displayName ?? null,
+        continue_on_error: false,
+        force: args.force,
+        items: [{ source_id: args.sourceId, capture_id: capture.source_id }],
+      })
+    },
+    onSuccess: () => {
+      void eventsQuery.refetch()
+      void metricsQuery.refetch()
+      void auditQuery.refetch()
+      void releaseStatusQuery.refetch()
+    },
+    onError: (err) => {
+      setFileError(firstLine(err))
+    },
+  })
+
+  const ingestBatchMutation = useMutation({
+    mutationFn: (args: { domain: string; items: Array<{ sourceId: string; url: string }>; releaseId?: string | null }) =>
+      postIngestionIngestBatch({
+        domain: args.domain,
+        release_id: args.releaseId ?? null,
+        created_by: displayName ?? null,
+        continue_on_error: batchContinueOnError,
+        force: batchForce,
+        items: args.items.map((it) => ({
+          source_id: it.sourceId,
+          url: it.url,
+          quarantine_suspicious: runnerQuarantineOnFail,
+        })),
+      }),
+    onSuccess: () => {
+      void eventsQuery.refetch()
+      void metricsQuery.refetch()
+      void auditQuery.refetch()
+      void releaseStatusQuery.refetch()
     },
   })
 
@@ -116,6 +246,25 @@ export function IngestionPage() {
       postReleasePromote(args.domain, args.releaseId, { reason: args.reason ?? null, promoted_by: displayName ?? null }),
   })
 
+  const releaseMergeMutation = useMutation({
+    mutationFn: (args: { domain: string; sourceReleaseIds: string[]; targetReleaseId?: string | null }) =>
+      postReleaseMerge(args.domain, {
+        source_release_ids: args.sourceReleaseIds,
+        target_release_id: args.targetReleaseId ?? null,
+        created_by: displayName ?? null,
+      }),
+    onSuccess: async () => {
+      setMergeError(null)
+      await releaseStatusQuery.refetch()
+      await auditQuery.refetch()
+      void eventsQuery.refetch()
+      void metricsQuery.refetch()
+    },
+    onError: (err) => {
+      setMergeError(firstLine(err))
+    },
+  })
+
   const releaseStatusQuery = useQuery({
     queryKey: releaseStatusQueryKey(domain),
     queryFn: () => getReleaseStatus(domain),
@@ -139,6 +288,17 @@ export function IngestionPage() {
     queryFn: () => getReleaseAudit(domain, 50),
     enabled: Boolean(domain),
   })
+
+  useEffect(() => {
+    if (!autoRefresh || !domain) return
+    const id = window.setInterval(() => {
+      void metricsQuery.refetch()
+      void eventsQuery.refetch()
+      void releaseStatusQuery.refetch()
+      void auditQuery.refetch()
+    }, 5000)
+    return () => window.clearInterval(id)
+  }, [autoRefresh, domain, metricsQuery, eventsQuery, releaseStatusQuery, auditQuery])
 
   const retrievalResults = useMemo(() => {
     const data = retrievalMutation.data as RetrievalQueryResponse | undefined
@@ -266,6 +426,69 @@ export function IngestionPage() {
     return ''
   }
 
+  const parseBatchLines = (raw: string): Array<{ sourceId: string; url: string }> => {
+    const lines = raw
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+    const out: Array<{ sourceId: string; url: string }> = []
+    const seen = new Set<string>()
+    const base = `src_${Date.now()}`
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      let sourceId = `${base}_${i + 1}`
+      let url = line
+      if (line.includes('|')) {
+        const [a, b] = line.split('|', 2)
+        if (a.trim() && b.trim()) {
+          sourceId = a.trim()
+          url = b.trim()
+        }
+      } else if (line.includes(',') && !line.trim().startsWith('http')) {
+        const [a, b] = line.split(',', 2)
+        if (a.trim() && b.trim()) {
+          sourceId = a.trim()
+          url = b.trim()
+        }
+      }
+      if (!url) continue
+      if (seen.has(sourceId)) continue
+      seen.add(sourceId)
+      out.push({ sourceId, url })
+    }
+    return out
+  }
+
+  const runBatchCapture = async () => {
+    if (!domain) return
+    setBatchError(null)
+    const items = parseBatchLines(batchUrls)
+    if (!items.length) {
+      setBatchError('Provide at least one URL (one per line, or source_id|url).')
+      return
+    }
+    try {
+      await rawCaptureBatchMutation.mutateAsync({ domain, items })
+    } catch (e) {
+      setBatchError(firstLine(e))
+    }
+  }
+
+  const runBatchCaptureAndIngest = async () => {
+    if (!domain) return
+    setBatchError(null)
+    const items = parseBatchLines(batchUrls)
+    if (!items.length) {
+      setBatchError('Provide at least one URL (one per line, or source_id|url).')
+      return
+    }
+    try {
+      await ingestBatchMutation.mutateAsync({ domain, items, releaseId: batchReleaseId.trim() ? batchReleaseId.trim() : null })
+    } catch (e) {
+      setBatchError(firstLine(e))
+    }
+  }
+
   const runCapture = async () => {
     if (!domain) return
     const url = runnerUrl.trim()
@@ -319,6 +542,10 @@ export function IngestionPage() {
   }
 
   const counts = (ingestionRunMutation.data as IngestionRunResponse | undefined)?.counts ?? {}
+  const batchCaptureResult = rawCaptureBatchMutation.data as IngestionRawCaptureBatchResponse | undefined
+  const batchIngestResult = ingestBatchMutation.data as IngestionIngestBatchResponse | undefined
+  const fileIngestResult = fileIngestMutation.data as IngestionRunBatchResponse | undefined
+  const mergeResult = releaseMergeMutation.data as ReleaseMergeResponse | undefined
 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
@@ -329,16 +556,33 @@ export function IngestionPage() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="w-full sm:max-w-md">
               <div className="text-xs font-semibold text-slate-500">Domain</div>
+              <select
+                value={domain && knownDomains.includes(domain) ? domain : ''}
+                onChange={(e) => setSelectedDomain(e.target.value)}
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                aria-label="Select existing domain"
+              >
+                <option value="">Select existing…</option>
+                {knownDomains.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
               <input
                 value={selectedDomain}
                 onChange={(e) => setSelectedDomain(e.target.value)}
-                placeholder="terraform"
+                placeholder="or type a new domain (e.g. terraform)"
                 className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
                 aria-label="Domain"
               />
               <div className="mt-2 text-xs text-slate-500">
                 {domain ? `Selected domain: ${domain}` : 'Select a domain to scope ingestion + retrieval.'}
               </div>
+              <label className="mt-2 flex items-center gap-2 text-xs text-slate-700">
+                <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+                Auto-refresh metrics/events/releases (5s)
+              </label>
               {domain && activeReleaseId ? <div className="mt-1 text-xs text-slate-500">Active release: {activeReleaseId}</div> : null}
               {domain && candidateReleaseId ? (
                 <div className="mt-1 text-xs text-slate-500">Candidate release (last run): {candidateReleaseId}</div>
@@ -354,6 +598,273 @@ export function IngestionPage() {
               </Link>
             </div>
           </div>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold text-slate-500">Ops</div>
+              <h2 className="mt-1 text-lg font-semibold text-slate-900">File Capture</h2>
+              <div className="mt-1 text-sm text-slate-600">
+                Upload a file (.html/.txt/.md/.doc/.docx) and store it as a capture (then ingest via `capture_id`).
+              </div>
+            </div>
+          </div>
+
+          {!domain ? (
+            <div className="mt-4 text-sm text-slate-600">Select a domain to capture a file.</div>
+          ) : (
+            <div className="mt-4 space-y-4">
+              {(fileError || fileCaptureMutation.isError || fileIngestMutation.isError) && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+                  <div className="text-sm font-semibold text-rose-800">Last file capture failed</div>
+                  <div className="mt-1 text-xs text-rose-800">
+                    {fileError ?? firstLine(fileCaptureMutation.error) ?? firstLine(fileIngestMutation.error)}
+                  </div>
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-rose-800">Show details</summary>
+                    <pre className="mt-2 overflow-auto rounded-lg bg-white p-3 text-xs text-slate-700">
+                      {JSON.stringify(
+                        {
+                          file_capture_error: fileCaptureMutation.isError ? errorDetails(fileCaptureMutation.error) : null,
+                          file_ingest_error: fileIngestMutation.isError ? errorDetails(fileIngestMutation.error) : null,
+                          last_file_capture_response: fileCaptureMutation.data ?? null,
+                          last_file_ingest_response: fileIngestResult ?? null,
+                        },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div className="lg:col-span-2 space-y-4">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">Source id</div>
+                    <input
+                      value={fileSourceId}
+                      onChange={(e) => setFileSourceId(e.target.value)}
+                      placeholder="file_example_001"
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">HTML file</div>
+                    <input
+                      type="file"
+                      accept=".html,.htm,.txt,.md,.doc,.docx,text/html,text/plain,text/markdown,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                      onChange={(e) => {
+                        setFileError(null)
+                        const f = e.target.files?.[0] ?? null
+                        setSelectedFile(f)
+                      }}
+                    />
+                    <div className="mt-1 text-xs text-slate-500">{selectedFile ? `Selected: ${selectedFile.name}` : 'Choose an HTML file.'}</div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">Release id (optional)</div>
+                    <input
+                      value={fileReleaseId}
+                      onChange={(e) => setFileReleaseId(e.target.value)}
+                      placeholder="leave blank to auto-generate"
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={fileForce} onChange={(e) => setFileForce(e.target.checked)} />
+                    Force (attempt ingest even if capture is not usable/quarantined)
+                  </label>
+                </div>
+
+                <div className="flex flex-col justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={fileCaptureMutation.isPending || !domain || !fileSourceId.trim() || !selectedFile}
+                    className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={async () => {
+                      if (!domain) return
+                      if (!fileSourceId.trim()) {
+                        setFileError('Source id is required.')
+                        return
+                      }
+                      if (!selectedFile) {
+                        setFileError('File is required.')
+                        return
+                      }
+                      setFileError(null)
+                      await fileCaptureMutation.mutateAsync({ domain, sourceId: fileSourceId.trim(), file: selectedFile })
+                    }}
+                  >
+                    {fileCaptureMutation.isPending ? 'Uploading...' : 'Capture file'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={fileIngestMutation.isPending || !domain || !fileSourceId.trim() || !selectedFile}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={async () => {
+                      if (!domain) return
+                      if (!fileSourceId.trim()) {
+                        setFileError('Source id is required.')
+                        return
+                      }
+                      if (!selectedFile) {
+                        setFileError('File is required.')
+                        return
+                      }
+                      setFileError(null)
+                      await fileIngestMutation.mutateAsync({
+                        domain,
+                        sourceId: fileSourceId.trim(),
+                        file: selectedFile,
+                        releaseId: fileReleaseId.trim() ? fileReleaseId.trim() : null,
+                        force: fileForce,
+                      })
+                    }}
+                  >
+                    {fileIngestMutation.isPending ? 'Uploading + ingesting...' : 'Capture + Ingest file'}
+                  </button>
+                </div>
+              </div>
+
+              {fileIngestResult ? (
+                <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-700">
+                    Latest file ingest response (release: {fileIngestResult.release_id})
+                  </summary>
+                  <pre className="mt-3 overflow-auto text-xs text-slate-700">{JSON.stringify(fileIngestResult, null, 2)}</pre>
+                </details>
+              ) : null}
+
+              {!fileIngestResult && fileCaptureMutation.data ? (
+                <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-700">Latest file capture response</summary>
+                  <pre className="mt-3 overflow-auto text-xs text-slate-700">{JSON.stringify(fileCaptureMutation.data, null, 2)}</pre>
+                </details>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold text-slate-500">Ops</div>
+              <h2 className="mt-1 text-lg font-semibold text-slate-900">Batch Capture + Ingest</h2>
+              <div className="mt-1 text-sm text-slate-600">Capture many URLs, optionally ingest into a release (leave blank to auto-generate).</div>
+            </div>
+          </div>
+
+          {!domain ? (
+            <div className="mt-4 text-sm text-slate-600">Select a domain to run batch ingestion.</div>
+          ) : (
+            <div className="mt-4 space-y-4">
+              {(batchError || rawCaptureBatchMutation.isError || ingestBatchMutation.isError) && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+                  <div className="text-sm font-semibold text-rose-800">Last batch failed</div>
+                  <div className="mt-1 text-xs text-rose-800">
+                    {batchError ?? firstLine(rawCaptureBatchMutation.error) ?? firstLine(ingestBatchMutation.error) ?? 'Request failed.'}
+                  </div>
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-rose-800">Show details</summary>
+                    <pre className="mt-2 overflow-auto rounded-lg bg-white p-3 text-xs text-slate-700">
+                      {JSON.stringify(
+                        {
+                          batch_capture_error: rawCaptureBatchMutation.isError ? errorDetails(rawCaptureBatchMutation.error) : null,
+                          batch_ingest_error: ingestBatchMutation.isError ? errorDetails(ingestBatchMutation.error) : null,
+                          last_batch_capture_response: batchCaptureResult ?? null,
+                          last_batch_ingest_response: batchIngestResult ?? null,
+                        },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div className="lg:col-span-2 space-y-4">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">URLs (one per line)</div>
+                    <textarea
+                      value={batchUrls}
+                      onChange={(e) => setBatchUrls(e.target.value)}
+                      rows={6}
+                      placeholder={'https://example.com/docs\nsrc_custom_2|https://example.com/guide'}
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+                    />
+                    <div className="mt-1 text-xs text-slate-500">Optional format: `source_id|url`.</div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">Release id (optional)</div>
+                    <input
+                      value={batchReleaseId}
+                      onChange={(e) => setBatchReleaseId(e.target.value)}
+                      placeholder="leave blank to auto-generate"
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="checkbox" checked={batchForce} onChange={(e) => setBatchForce(e.target.checked)} />
+                      Force (attempt ingest even if capture is quarantined / not usable)
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={batchContinueOnError}
+                        onChange={(e) => setBatchContinueOnError(e.target.checked)}
+                      />
+                      Continue on error (collect per-item failures)
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={rawCaptureBatchMutation.isPending || !domain}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => void runBatchCapture()}
+                  >
+                    {rawCaptureBatchMutation.isPending ? 'Capturing...' : 'Capture URLs (batch)'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={ingestBatchMutation.isPending || !domain}
+                    className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => void runBatchCaptureAndIngest()}
+                  >
+                    {ingestBatchMutation.isPending ? 'Capturing + ingesting...' : 'Capture + Ingest (batch)'}
+                  </button>
+                </div>
+              </div>
+
+              {batchIngestResult ? (
+                <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-700">
+                    Latest batch ingest response (release: {batchIngestResult.release_id})
+                  </summary>
+                  <pre className="mt-3 overflow-auto text-xs text-slate-700">{JSON.stringify(batchIngestResult, null, 2)}</pre>
+                </details>
+              ) : null}
+
+              {!batchIngestResult && batchCaptureResult ? (
+                <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-700">Latest batch capture response</summary>
+                  <pre className="mt-3 overflow-auto text-xs text-slate-700">{JSON.stringify(batchCaptureResult, null, 2)}</pre>
+                </details>
+              ) : null}
+            </div>
+          )}
         </div>
 
         <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6">
@@ -704,11 +1215,11 @@ export function IngestionPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-xs font-semibold text-slate-500">Live Health</div>
-                <h2 className="mt-1 text-lg font-semibold text-slate-900">Metrics</h2>
-              </div>
-              <button
-                type="button"
-                disabled={!domain || metricsQuery.isFetching}
+              <h2 className="mt-1 text-lg font-semibold text-slate-900">Metrics</h2>
+            </div>
+            <button
+              type="button"
+              disabled={!domain || metricsQuery.isFetching}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => void metricsQuery.refetch()}
               >
@@ -878,6 +1389,18 @@ export function IngestionPage() {
               <h2 className="mt-1 text-lg font-semibold text-slate-900">Release Controls</h2>
               <div className="mt-1 text-sm text-slate-600">Promote candidate releases for the selected domain.</div>
             </div>
+            <button
+              type="button"
+              disabled={!domain || releaseStatusQuery.isFetching || auditQuery.isFetching}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={async () => {
+                if (!domain) return
+                await releaseStatusQuery.refetch()
+                await auditQuery.refetch()
+              }}
+            >
+              {releaseStatusQuery.isFetching || auditQuery.isFetching ? 'Refreshing...' : 'Refresh'}
+            </button>
           </div>
 
           {!domain ? (
@@ -931,6 +1454,92 @@ export function IngestionPage() {
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white">
+                <div className="border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500">Merge releases</div>
+                <div className="p-3 space-y-3">
+                  {(mergeError || releaseMergeMutation.isError) && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+                      <div className="text-sm font-semibold text-rose-800">Merge failed</div>
+                      <div className="mt-1 text-xs text-rose-800">{mergeError ?? firstLine(releaseMergeMutation.error)}</div>
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-rose-800">Show details</summary>
+                        <pre className="mt-2 overflow-auto rounded-lg bg-white p-3 text-xs text-slate-700">
+                          {JSON.stringify(
+                            {
+                              merge_error: releaseMergeMutation.isError ? errorDetails(releaseMergeMutation.error) : null,
+                              last_merge_response: mergeResult ?? null,
+                            },
+                            null,
+                            2,
+                          )}
+                        </pre>
+                      </details>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">Target release id (optional)</div>
+                    <input
+                      value={mergeTargetReleaseId}
+                      onChange={(e) => setMergeTargetReleaseId(e.target.value)}
+                      placeholder="leave blank to auto-generate"
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <div className="text-xs text-slate-600">Select 2+ releases below, then merge. Merge is fail-fast.</div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      disabled={!domain || mergeSelectedReleaseIds.length < 2 || releaseMergeMutation.isPending}
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={async () => {
+                        if (!domain) return
+                        if (mergeSelectedReleaseIds.length < 2) {
+                          setMergeError('Select at least two releases to merge.')
+                          return
+                        }
+                        setMergeError(null)
+                        await releaseMergeMutation.mutateAsync({
+                          domain,
+                          sourceReleaseIds: mergeSelectedReleaseIds,
+                          targetReleaseId: mergeTargetReleaseId.trim() ? mergeTargetReleaseId.trim() : null,
+                        })
+                      }}
+                    >
+                      {releaseMergeMutation.isPending ? 'Merging...' : 'Merge selected'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!domain || !mergeResult?.target_release_id || releasePromoteMutation.isPending}
+                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={async () => {
+                        if (!domain || !mergeResult?.target_release_id) return
+                        await releasePromoteMutation.mutateAsync({
+                          domain,
+                          releaseId: mergeResult.target_release_id,
+                          reason: 'promote merged release from ingestion page',
+                        })
+                        await releaseStatusQuery.refetch()
+                        await auditQuery.refetch()
+                      }}
+                    >
+                      {releasePromoteMutation.isPending ? 'Promoting...' : 'Promote merged'}
+                    </button>
+                  </div>
+
+                  {mergeResult ? (
+                    <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <summary className="cursor-pointer text-xs font-semibold text-slate-700">
+                        Latest merge response (target: {mergeResult.target_release_id})
+                      </summary>
+                      <pre className="mt-3 overflow-auto text-xs text-slate-700">{JSON.stringify(mergeResult, null, 2)}</pre>
+                    </details>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white">
                 <div className="border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500">Releases</div>
                 {releaseStatusQuery.isError ? (
                   <div className="px-3 py-3 text-sm text-slate-600">Failed to load releases.</div>
@@ -940,14 +1549,27 @@ export function IngestionPage() {
                   <div className="px-3 py-3 text-sm text-slate-600">No releases yet.</div>
                 ) : (
                   <div className="divide-y divide-slate-200">
-                    {(releaseStatusQuery.data?.releases ?? []).map((rid) => (
-                      <div key={rid} className="flex items-center justify-between px-3 py-2">
-                        <div className="truncate text-sm text-slate-700">{rid}</div>
-                        {rid === activeReleaseId ? (
-                          <div className="text-xs font-semibold text-emerald-700">active</div>
-                        ) : null}
-                      </div>
-                    ))}
+                    {(releaseStatusQuery.data?.releases ?? []).map((rid) => {
+                      const checked = mergeSelectedReleaseIds.includes(rid)
+                      return (
+                        <div key={rid} className="flex items-center justify-between gap-3 px-3 py-2">
+                          <label className="flex min-w-0 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = new Set(mergeSelectedReleaseIds)
+                                if (e.target.checked) next.add(rid)
+                                else next.delete(rid)
+                                setMergeSelectedReleaseIds(Array.from(next))
+                              }}
+                            />
+                            <div className="truncate text-sm text-slate-700">{rid}</div>
+                          </label>
+                          {rid === activeReleaseId ? <div className="text-xs font-semibold text-emerald-700">active</div> : null}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DistilledSection",
+  "type": "object",
+  "properties": {
+    "section_id": { "type": "string" },
+    "domain": { "type": "string" },
+    "kind": { "type": "string", "enum": ["definition", "example", "howto", "note", "explanation"] },
+    "title": { "type": ["string", "null"] },
+    "clean_text": { "type": "string" },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_hash": { "type": "string" },
+          "offset": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 }
+        },
+        "required": ["source_hash", "offset"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["section_id", "domain", "kind", "clean_text"],
+  "additionalProperties": false
+}

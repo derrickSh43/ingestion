@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, List
 import json
 
-from .env import get_releases_root as _get_releases_root
+from env import get_releases_root as _get_releases_root
 
 
 def _utc_now_iso() -> str:
@@ -77,9 +77,10 @@ class ReleaseManager:
 			"domain": domain,
 			"created_by": created_by,
 			"created_at": _utc_now_iso(),
+			"metadata": {},
 		}
 		if payload and isinstance(payload, dict):
-			meta.update(payload)
+			meta["metadata"] = payload
 
 		release_dir = self._release_dir(domain, release_id)
 		release_dir.mkdir(parents=True, exist_ok=True)

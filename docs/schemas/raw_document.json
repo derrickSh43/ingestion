@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawDocument",
+  "type": "object",
+  "properties": {
+    "source_id": { "type": "string" },
+    "http_status": { "type": "integer" },
+    "headers": { "type": "object" },
+    "raw_html_path": { "type": "string" },
+    "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$" },
+    "content_signature": { "type": "string", "pattern": "^hmac-sha256:[0-9a-fA-F]{64}$" },
+    "retrieved_at": { "type": "string", "format": "date-time" },
+    "cleaned_text": { "type": "string" },
+    "quarantined": { "type": "boolean" },
+    "quarantine_reason": { "type": "string" },
+    "quarantined_at": { "type": "string", "format": "date-time" }
+  },
+  "required": ["source_id", "http_status", "raw_html_path", "content_hash", "retrieved_at"],
+  "additionalProperties": false
+}

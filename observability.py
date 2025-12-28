@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import json
 
-from .env import get_observability_root as _get_observability_root
+from env import get_observability_root as _get_observability_root
 
 def _utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")

@@ -19,7 +19,7 @@ import hashlib
 import json
 import re
 
-from .env import get_chunks_root
+from env import get_chunks_root
 
 DEFAULT_CHUNKS_ROOT = get_chunks_root()
 

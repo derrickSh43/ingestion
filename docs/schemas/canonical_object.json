@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CanonicalLearningObject",
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "domain": { "type": "string" },
+    "title": { "type": "string" },
+    "body": { "type": "array", "items": { "type": "string" } },
+    "concepts": { "type": "array", "items": { "type": "string" } },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "source_id": { "type": "string" },
+        "release_id": { "type": "string" }
+      },
+      "required": ["source_id", "release_id"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["id", "domain", "title", "body", "provenance"],
+  "additionalProperties": false
+}

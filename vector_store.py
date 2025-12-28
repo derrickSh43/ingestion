@@ -28,7 +28,7 @@ import json
 import math
 import os
 
-from .env import get_vector_index_root
+from env import get_vector_index_root
 
 class VectorStoreAdapter(Protocol):
     def upsert(self, *, domain: str, release_id: str, chunks: List[Dict[str, Any]]) -> None:

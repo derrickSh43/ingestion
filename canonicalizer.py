@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 import hashlib
 import json
 
-from .env import get_canonical_root
+from env import get_canonical_root
 
 DEFAULT_CANONICAL_ROOT = get_canonical_root()
 

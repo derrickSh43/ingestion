@@ -5,26 +5,26 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import hashlib
 
-from .canonicalizer import canonicalize_sections
-from .chunker import chunk_canonical_objects, persist_chunks
-from .distiller import distill_sections_from_html
-from .embeddings import (
+from canonicalizer import canonicalize_sections
+from chunker import chunk_canonical_objects, persist_chunks
+from distiller import distill_sections_from_html
+from embeddings import (
 	DeterministicHashEmbeddingProvider,
 	EmbeddingProvider,
 	FileEmbeddingStore,
 	OllamaEmbeddingProvider,
 	attach_embeddings_for_chunks,
 )
-from .env import (
+from env import (
 	get_embeddings_root,
 	get_ingestion_embed_provider,
 	get_ollama_base_url,
 	get_ollama_embed_model,
 	get_ollama_timeout_s,
 )
-from .releases import ReleaseManager
-from .section_classifier import filter_instructional_sections
-from .vector_store import build_vector_store_adapter
+from releases import ReleaseManager
+from section_classifier import filter_instructional_sections
+from vector_store import build_vector_store_adapter
 
 
 def _sha256_hex(text: str) -> str:
@@ -60,6 +60,7 @@ def run_ingestion(
 	release_id: str,
 	raw_html: str,
 	created_by: Optional[str] = None,
+	write_release: bool = True,
 ) -> IngestionRunResult:
 	if not domain or not domain.strip():
 		raise ValueError("domain is required")
@@ -90,22 +91,24 @@ def run_ingestion(
 	vector_store = build_vector_store_adapter()
 	vector_store.upsert(domain=domain, release_id=release_id, chunks=chunks_with_embeddings)
 
-	release_manager = ReleaseManager()
-	release_meta = release_manager.create_release(
-		domain=domain,
-		release_id=release_id,
-		created_by=created_by,
-		payload={
-			"source_id": source_id,
-			"source_hash": source_hash,
-			"stats": {
-				"sections_total": len(sections),
-				"sections_kept": len(kept_sections),
-				"canonical_objects": len(canonical),
-				"chunks": len(chunks),
+	release_meta: Dict[str, Any] = {}
+	if write_release:
+		release_manager = ReleaseManager()
+		release_meta = release_manager.create_release(
+			domain=domain,
+			release_id=release_id,
+			created_by=created_by,
+			payload={
+				"source_id": source_id,
+				"source_hash": source_hash,
+				"stats": {
+					"sections_total": len(sections),
+					"sections_kept": len(kept_sections),
+					"canonical_objects": len(canonical),
+					"chunks": len(chunks),
+				},
 			},
-		},
-	)
+		)
 
 	return IngestionRunResult(
 		status="ok",
