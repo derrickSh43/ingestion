@@ -11,6 +11,7 @@ venv/
 .env
 .env.*
 .envrc
+!.env.example
 *.pem
 *.key
 *.crt
@@ -38,6 +39,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 frontend/.env.*
+!frontend/.env.example
 frontend/.vite/
 frontend/.cache/
 frontend/.parcel-cache/

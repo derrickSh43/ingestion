@@ -56,6 +56,10 @@ npm run dev
 Frontend config:
 - `frontend/.env`: set `VITE_API_BASE_URL=http://localhost:8002` to point the UI at the backend.
 
+Sample env files:
+- Backend: copy `.env.example` → `.env`
+- Frontend: copy `frontend/.env.example` → `frontend/.env`
+
 Useful URLs:
 - Backend docs: `http://127.0.0.1:8002/docs`
 - Frontend UI: `http://127.0.0.1:5174/`
